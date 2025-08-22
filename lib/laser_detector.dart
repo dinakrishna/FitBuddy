@@ -16,7 +16,9 @@ class LaserDetector {
   LaserDetector(this.logNotifier);
 
   /// Returns a list of detected red blob centers (Offset), or empty if none found.
-  List<Offset> detectRedBlobs(CameraImage image, int frameNumber) {
+  List<Offset> detectBlobsByColor(CameraImage image, int frameNumber, Color color) {
+    // Convert color to RGB
+    int targetR = color.red, targetG = color.green, targetB = color.blue;
     if (image.format.group != ImageFormatGroup.yuv420 && image.format.group != ImageFormatGroup.bgra8888) {
       _log('Frame $frameNumber: Unsupported format');
       return [];
@@ -46,7 +48,9 @@ class LaserDetector {
           g = (Y - 0.344136 * (U - 128) - 0.714136 * (V - 128)).clamp(0, 255).toInt();
           b = (Y + 1.772 * (U - 128)).clamp(0, 255).toInt();
         }
-        if (r > 180 && r > g + 60 && r > b + 60) {
+        // Color distance threshold
+        double dist = ((r - targetR) * (r - targetR) + (g - targetG) * (g - targetG) + (b - targetB) * (b - targetB)).toDouble();
+        if (dist < 4000) {
           candidates.add(Offset(x.toDouble(), y.toDouble()));
         }
       }
