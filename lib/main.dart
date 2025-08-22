@@ -36,14 +36,17 @@ class CameraGameScreen extends StatefulWidget {
 
 class _CameraGameScreenState extends State<CameraGameScreen> {
   CameraController? _controller;
-  LaserDetector _laserDetector = LaserDetector();
+  late LaserDetector _laserDetector;
   GameLogic _gameLogic = GameLogic();
   Offset? _laserPosition;
   bool _isBlocked = false;
+  int _frameCount = 0;
+  final ValueNotifier<List<String>> _logNotifier = ValueNotifier([]);
 
   @override
   void initState() {
     super.initState();
+    _laserDetector = LaserDetector(_logNotifier);
     if (cameras.isNotEmpty) {
       _controller = CameraController(
         cameras[0],
@@ -59,10 +62,11 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
   }
 
   void _processCameraImage(CameraImage image) {
-    final result = _laserDetector.detectLaser(image);
+    _frameCount++;
+    final laserPos = _laserDetector.detectLaser(image, _frameCount);
     setState(() {
-      _laserPosition = result.laserPosition;
-      _isBlocked = result.isBlocked;
+      _laserPosition = laserPos;
+      _isBlocked = false; // Placeholder: always false for now
     });
     _gameLogic.updateLaser(_laserPosition, _isBlocked);
   }
@@ -78,25 +82,67 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
     return Scaffold(
       body: _controller == null || !_controller!.value.isInitialized
           ? const Center(child: CircularProgressIndicator())
-          : Stack(
-              fit: StackFit.expand,
+          : Column(
               children: [
-                CameraPreview(_controller!),
-                CustomPaint(
-                  painter: OverlayPainter(
-                    laserPosition: _laserPosition,
-                    isBlocked: _isBlocked,
+                Expanded(
+                  flex: 8,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      Offset? mappedLaser;
+                      if (_laserPosition != null) {
+                        mappedLaser = Offset(
+                          _laserPosition!.dx * constraints.maxWidth / _controller!.value.previewSize!.width,
+                          _laserPosition!.dy * constraints.maxHeight / _controller!.value.previewSize!.height,
+                        );
+                      }
+                      return Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          CameraPreview(_controller!),
+                          CustomPaint(
+                            painter: OverlayPainter(
+                              laserPosition: mappedLaser,
+                              isBlocked: _isBlocked,
+                            ),
+                            child: Container(),
+                          ),
+                          Positioned(
+                            top: 20,
+                            left: 20,
+                            child: Card(
+                              color: Colors.white70,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Text('Hits: ${_gameLogic.hitCount}', style: const TextStyle(fontSize: 20)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
-                  child: Container(),
                 ),
-                Positioned(
-                  top: 40,
-                  left: 20,
-                  child: Card(
-                    color: Colors.white70,
-                    child: Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('Hits: {_gameLogic.hitCount}', style: const TextStyle(fontSize: 20)),
+                Expanded(
+                  flex: 2,
+                  child: Container(
+                    color: Colors.black,
+                    child: ValueListenableBuilder<List<String>>(
+                      valueListenable: _logNotifier,
+                      builder: (context, logs, _) {
+                        return ListView(
+                          reverse: true,
+                          children: logs.reversed
+                              .map((line) => Text(
+                                    line,
+                                    style: const TextStyle(
+                                      color: Colors.greenAccent,
+                                      fontFamily: 'monospace',
+                                      fontSize: 10,
+                                    ),
+                                  ))
+                              .toList(),
+                        );
+                      },
                     ),
                   ),
                 ),
