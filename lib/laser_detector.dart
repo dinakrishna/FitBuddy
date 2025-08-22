@@ -15,25 +15,18 @@ class LaserDetector {
 
   LaserDetector(this.logNotifier);
 
-  Offset? detectLaser(CameraImage image, int frameNumber) {
-    int maxBrightness = 0;
-    int? laserX;
-    int? laserY;
-    int totalBrightness = 0;
-    int pixelCount = 0;
-    List<String> candidatePixels = [];
-    int brightestR = 0, brightestG = 0, brightestB = 0;
-
+  /// Returns a list of detected red blob centers (Offset), or empty if none found.
+  List<Offset> detectRedBlobs(CameraImage image, int frameNumber) {
     if (image.format.group != ImageFormatGroup.yuv420 && image.format.group != ImageFormatGroup.bgra8888) {
       _log('Frame $frameNumber: Unsupported format');
-      return null;
+      return [];
     }
-
     final width = image.width;
     final height = image.height;
-
-    for (int y = 0; y < height; y += 4) {
-      for (int x = 0; x < width; x += 4) {
+    // Step 1: Collect all candidate red pixels
+    List<Offset> candidates = [];
+    for (int y = 0; y < height; y += 2) {
+      for (int x = 0; x < width; x += 2) {
         int r = 0, g = 0, b = 0;
         if (image.format.group == ImageFormatGroup.bgra8888) {
           final i = (y * width + x) * 4;
@@ -53,36 +46,42 @@ class LaserDetector {
           g = (Y - 0.344136 * (U - 128) - 0.714136 * (V - 128)).clamp(0, 255).toInt();
           b = (Y + 1.772 * (U - 128)).clamp(0, 255).toInt();
         }
-        int brightness = r;
-        totalBrightness += (r + g + b) ~/ 3;
-        pixelCount++;
         if (r > 180 && r > g + 60 && r > b + 60) {
-          candidatePixels.add('($x,$y) R:$r G:$g B:$b');
-          if (brightness > maxBrightness) {
-            maxBrightness = brightness;
-            laserX = x;
-            laserY = y;
-            brightestR = r;
-            brightestG = g;
-            brightestB = b;
-          }
+          candidates.add(Offset(x.toDouble(), y.toDouble()));
         }
       }
     }
-    double avgBrightness = pixelCount > 0 ? totalBrightness / pixelCount : 0;
-    if (laserX != null && laserY != null) {
-      _log('Frame $frameNumber | Avg: ${avgBrightness.toStringAsFixed(1)} | Candidates: ${candidatePixels.length}');
-      _log('Brightest: ($laserX,$laserY) R:$brightestR G:$brightestG B:$brightestB | Brightness: $maxBrightness | RedRatio: ${brightestR / ((brightestG + brightestB + 1) / 2)}');
-      if (candidatePixels.isNotEmpty) {
-        _log('Candidates: ${candidatePixels.take(5).join(' | ')}${candidatePixels.length > 5 ? ' ...' : ''}');
+    // Step 2: Simple blob detection (group nearby candidates)
+    List<List<Offset>> blobs = [];
+    double distThresh = 20.0; // pixels
+    for (final pt in candidates) {
+      bool added = false;
+      for (final blob in blobs) {
+        for (final bpt in blob) {
+          if ((pt - bpt).distance < distThresh) {
+            blob.add(pt);
+            added = true;
+            break;
+          }
+        }
+        if (added) break;
       }
-      _trimLogs();
-      return Offset(laserX.toDouble(), laserY.toDouble());
-    } else {
-      _log('Frame $frameNumber | Avg: ${avgBrightness.toStringAsFixed(1)} | No pixel above threshold | Max brightness: $maxBrightness');
-      _trimLogs();
-      return null;
+      if (!added) blobs.add([pt]);
     }
+    // Step 3: Calculate centroid for each blob
+    List<Offset> centers = [];
+    for (final blob in blobs) {
+      if (blob.length < 5) continue; // ignore tiny blobs
+      double sumX = 0, sumY = 0;
+      for (final pt in blob) {
+        sumX += pt.dx;
+        sumY += pt.dy;
+      }
+      centers.add(Offset(sumX / blob.length, sumY / blob.length));
+    }
+    _log('Frame $frameNumber | Blobs found: ${centers.length}');
+    _trimLogs();
+    return centers;
   }
   void _log(String msg) {
     final logs = logNotifier.value;

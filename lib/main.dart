@@ -38,7 +38,7 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
   CameraController? _controller;
   late LaserDetector _laserDetector;
   GameLogic _gameLogic = GameLogic();
-  Offset? _laserPosition;
+  List<Offset> _laserPositions = [];
   bool _isBlocked = false;
   int _frameCount = 0;
   final ValueNotifier<List<String>> _logNotifier = ValueNotifier([]);
@@ -63,12 +63,15 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
 
   void _processCameraImage(CameraImage image) {
     _frameCount++;
-    final laserPos = _laserDetector.detectLaser(image, _frameCount);
+    final blobCenters = _laserDetector.detectRedBlobs(image, _frameCount);
     setState(() {
-      _laserPosition = laserPos;
+      _laserPositions = blobCenters;
       _isBlocked = false; // Placeholder: always false for now
     });
-    _gameLogic.updateLaser(_laserPosition, _isBlocked);
+    // Optionally, update game logic with first blob
+    if (_laserPositions.isNotEmpty) {
+      _gameLogic.updateLaser(_laserPositions.first, _isBlocked);
+    }
   }
 
   @override
@@ -88,20 +91,18 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
                   flex: 8,
                   child: LayoutBuilder(
                     builder: (context, constraints) {
-                      Offset? mappedLaser;
-                      if (_laserPosition != null) {
-                        mappedLaser = Offset(
-                          _laserPosition!.dx * constraints.maxWidth / _controller!.value.previewSize!.width,
-                          _laserPosition!.dy * constraints.maxHeight / _controller!.value.previewSize!.height,
-                        );
-                      }
+                      List<Offset> mappedLasers = _laserPositions
+                          .map((pos) => Offset(
+                              pos.dx * constraints.maxWidth / _controller!.value.previewSize!.width,
+                              pos.dy * constraints.maxHeight / _controller!.value.previewSize!.height))
+                          .toList();
                       return Stack(
                         fit: StackFit.expand,
                         children: [
                           CameraPreview(_controller!),
                           CustomPaint(
                             painter: OverlayPainter(
-                              laserPosition: mappedLaser,
+                              laserPositions: mappedLasers,
                               isBlocked: _isBlocked,
                             ),
                             child: Container(),

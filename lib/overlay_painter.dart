@@ -2,34 +2,24 @@
 import 'package:flutter/material.dart';
 
 class OverlayPainter extends CustomPainter {
-  final Offset? laserPosition;
+  final List<Offset> laserPositions;
   final bool isBlocked;
 
-  OverlayPainter({this.laserPosition, this.isBlocked = false});
+  OverlayPainter({required this.laserPositions, this.isBlocked = false});
 
   @override
   void paint(Canvas canvas, Size size) {
-    if (laserPosition != null) {
-      if (isBlocked) {
-        // Draw cross
-        final paint = Paint()
-          ..color = Colors.red
-          ..strokeWidth = 4;
-        canvas.drawLine(laserPosition! - const Offset(20, 20), laserPosition! + const Offset(20, 20), paint);
-        canvas.drawLine(laserPosition! - const Offset(20, -20), laserPosition! + const Offset(20, -20), paint);
-      } else {
-        // Draw circle
-        final paint = Paint()
-          ..color = Colors.green
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = 4;
-        canvas.drawCircle(laserPosition!, 24, paint);
-      }
+    final paint = Paint()
+      ..color = isBlocked ? Colors.red : Colors.green
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 4;
+    for (final pos in laserPositions) {
+      canvas.drawCircle(pos, 24, paint);
     }
   }
 
   @override
   bool shouldRepaint(covariant OverlayPainter oldDelegate) {
-    return oldDelegate.laserPosition != laserPosition || oldDelegate.isBlocked != isBlocked;
+    return oldDelegate.laserPositions != laserPositions || oldDelegate.isBlocked != isBlocked;
   }
 }
