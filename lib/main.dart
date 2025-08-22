@@ -43,6 +43,33 @@ class CameraGameScreen extends StatefulWidget {
 }
 
 class _CameraGameScreenState extends State<CameraGameScreen> {
+  ResolutionPreset _selectedPreset = ResolutionPreset.high;
+  final Map<String, ResolutionPreset> _presetMap = {
+    'Low': ResolutionPreset.low,
+    'Medium': ResolutionPreset.medium,
+    'High': ResolutionPreset.high,
+    'Very High': ResolutionPreset.veryHigh,
+    'Ultra High': ResolutionPreset.ultraHigh,
+    'Max': ResolutionPreset.max,
+  };
+
+  Future<void> _restartCamera(ResolutionPreset preset) async {
+    if (_controller != null) {
+      await _controller!.dispose();
+    }
+    setState(() {
+      _controller = null;
+    });
+    _controller = CameraController(
+      cameras[0],
+      preset,
+      enableAudio: false,
+    );
+    await _controller!.initialize();
+    if (!mounted) return;
+    setState(() {});
+    _controller!.startImageStream(_processCameraImage);
+  }
   Color _selectedColor = Colors.red;
   CameraController? _controller;
   late LaserDetector _laserDetector;
@@ -112,16 +139,7 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
     super.initState();
     _laserDetector = LaserDetector(_logNotifier);
     if (cameras.isNotEmpty) {
-      _controller = CameraController(
-        cameras[0],
-        ResolutionPreset.medium,
-        enableAudio: false,
-      );
-      _controller!.initialize().then((_) {
-        if (!mounted) return;
-        setState(() {});
-        _controller!.startImageStream(_processCameraImage);
-      });
+      _restartCamera(_selectedPreset);
     } else {
       // No camera available
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -142,8 +160,11 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
     }
   }
 
+  // Throttle frame processing to every 5th frame to prevent freezing at high resolutions
   void _processCameraImage(CameraImage image) {
     _frameCount++;
+    const int throttle = 5; // Process every 5th frame
+    if (_frameCount % throttle != 0) return;
     final blobCenters = _laserDetector.detectBlobsByColor(image, _frameCount, _selectedColor);
     setState(() {
       _laserPositions = blobCenters;
@@ -169,6 +190,31 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
     return Scaffold(
       body: Column(
         children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: [
+                const Text('Resolution: ', style: TextStyle(fontSize: 16)),
+                DropdownButton<ResolutionPreset>(
+                  value: _selectedPreset,
+                  items: _presetMap.entries
+                      .map((entry) => DropdownMenuItem<ResolutionPreset>(
+                            value: entry.value,
+                            child: Text(entry.key),
+                          ))
+                      .toList(),
+                  onChanged: (preset) {
+                    if (preset != null) {
+                      setState(() {
+                        _selectedPreset = preset;
+                      });
+                      _restartCamera(preset);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
           Expanded(
             flex: 8,
             child: LayoutBuilder(
