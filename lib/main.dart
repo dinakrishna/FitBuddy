@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
@@ -20,21 +21,21 @@ class DetectionManager {
     this.mode = DetectionMode.blob,
   });
 
-  Offset? detect(CameraImage image, int frameNumber, Color selectedColor, {
+  List<Offset> detect(CameraImage image, int frameNumber, Color selectedColor, {
     int pixelStep = 2,
     int minBlobSize = 5,
   }) {
     if (mode == DetectionMode.blob) {
-      final blobs = blobDetector.detectBlobsByColor(
+      return blobDetector.detectBlobsByColor(
         image,
         frameNumber,
         selectedColor,
         pixelStep: pixelStep,
         minBlobSize: minBlobSize,
       );
-      return blobs.isNotEmpty ? blobs.first : null;
     } else {
-      return tinyPointDetector.detect(image, frameNumber);
+      final point = tinyPointDetector.detect(image, frameNumber);
+      return point != null ? [point] : [];
     }
   }
 }
@@ -74,6 +75,31 @@ class CameraGameScreen extends StatefulWidget {
 }
 
 class _CameraGameScreenState extends State<CameraGameScreen> {
+  // Helper for isolate-based detection
+  static Future<List<Offset>> runDetectionIsolate(Map<String, dynamic> args) async {
+    final CameraImage image = args['image'];
+    final int frameNumber = args['frameNumber'];
+    final DetectionMode mode = args['mode'];
+    final Color selectedColor = args['selectedColor'];
+    final int pixelStep = args['pixelStep'];
+    final int minBlobSize = args['minBlobSize'];
+    final TinyPointDetectorConfig tinyConfig = args['tinyConfig'];
+    // Recreate detectors (no logNotifier in isolate)
+    final blobDetector = LaserDetector(ValueNotifier([]));
+    final tinyPointDetector = TinyPointDetector(ValueNotifier([]), tinyConfig);
+    if (mode == DetectionMode.blob) {
+      return blobDetector.detectBlobsByColor(
+        image,
+        frameNumber,
+        selectedColor,
+        pixelStep: pixelStep,
+        minBlobSize: minBlobSize,
+      );
+    } else {
+      final point = tinyPointDetector.detect(image, frameNumber);
+      return point != null ? [point] : [];
+    }
+  }
   ResolutionPreset _selectedPreset = ResolutionPreset.high;
   final Map<String, ResolutionPreset> _presetMap = {
     'Low': ResolutionPreset.low,
@@ -404,21 +430,26 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
       return;
     }
     _detectionManager.mode = _detectionMode;
-    Offset? detected = _detectionManager.detect(
-      image,
-      _frameCount,
-      _selectedColor,
-      pixelStep: _pixelStep,
-      minBlobSize: _minBlobSize,
-    );
-    setState(() {
-      _laserPositions = detected != null ? [detected] : [];
-      _isBlocked = false;
+    // Prepare args for isolate
+    final args = {
+      'image': image,
+      'frameNumber': _frameCount,
+      'mode': _detectionMode,
+      'selectedColor': _selectedColor,
+      'pixelStep': _pixelStep,
+      'minBlobSize': _minBlobSize,
+      'tinyConfig': _tinyPointDetector.config,
+    };
+    compute(runDetectionIsolate, args).then((detectedPositions) {
+      setState(() {
+        _laserPositions = detectedPositions;
+        _isBlocked = false;
+      });
+      if (_laserPositions.isNotEmpty) {
+        _gameLogic.updateLaser(_laserPositions.first, _isBlocked);
+      }
+      _isProcessingFrame = false;
     });
-    if (_laserPositions.isNotEmpty) {
-      _gameLogic.updateLaser(_laserPositions.first, _isBlocked);
-    }
-    _isProcessingFrame = false;
   }
 
   @override
