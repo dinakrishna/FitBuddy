@@ -1,5 +1,3 @@
-
-
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter_colorpicker/flutter_colorpicker.dart';
@@ -7,6 +5,39 @@ import 'laser_detector.dart';
 import 'overlay_painter.dart';
 import 'game_logic.dart';
 import 'package:flutter/services.dart';
+import 'tiny_point_detector.dart';
+
+enum DetectionMode { blob, tinyPoint }
+
+class DetectionManager {
+  final LaserDetector blobDetector;
+  final TinyPointDetector tinyPointDetector;
+  DetectionMode mode;
+
+  DetectionManager({
+    required this.blobDetector,
+    required this.tinyPointDetector,
+    this.mode = DetectionMode.blob,
+  });
+
+  Offset? detect(CameraImage image, int frameNumber, Color selectedColor, {
+    int pixelStep = 2,
+    int minBlobSize = 5,
+  }) {
+    if (mode == DetectionMode.blob) {
+      final blobs = blobDetector.detectBlobsByColor(
+        image,
+        frameNumber,
+        selectedColor,
+        pixelStep: pixelStep,
+        minBlobSize: minBlobSize,
+      );
+      return blobs.isNotEmpty ? blobs.first : null;
+    } else {
+      return tinyPointDetector.detect(image, frameNumber);
+    }
+  }
+}
 
 List<CameraDescription> cameras = [];
 
@@ -73,21 +104,38 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
   Color _selectedColor = Colors.red;
   CameraController? _controller;
   late LaserDetector _laserDetector;
+  late TinyPointDetector _tinyPointDetector;
+  late DetectionManager _detectionManager;
   GameLogic _gameLogic = GameLogic();
   List<Offset> _laserPositions = [];
   bool _isBlocked = false;
+  bool _isProcessingFrame = false;
   int _frameCount = 0;
   final ValueNotifier<List<String>> _logNotifier = ValueNotifier([]);
   int _pixelStep = 2;
   int _minBlobSize = 5;
+  DetectionMode _detectionMode = DetectionMode.blob;
 
   void _showColorPicker() {
     showDialog(
       context: context,
       builder: (context) {
         Color tempColor = _selectedColor;
-        int tempPixelStep = 2;
-        int tempMinBlobSize = 5;
+        int tempPixelStep = _pixelStep;
+        int tempMinBlobSize = _minBlobSize;
+        // TinyPointDetector config
+        TinyPointDetectorConfig tempTinyConfig = TinyPointDetectorConfig(
+          brightnessThreshold: _tinyPointDetector.config.brightnessThreshold,
+          clusterRadius: _tinyPointDetector.config.clusterRadius,
+          minClusterPixels: _tinyPointDetector.config.minClusterPixels,
+          colorFilterEnabled: _tinyPointDetector.config.colorFilterEnabled,
+          hMin: _tinyPointDetector.config.hMin,
+          hMax: _tinyPointDetector.config.hMax,
+          sMin: _tinyPointDetector.config.sMin,
+          sMax: _tinyPointDetector.config.sMax,
+          vMin: _tinyPointDetector.config.vMin,
+          vMax: _tinyPointDetector.config.vMax,
+        );
         final media = MediaQuery.of(context);
         final double dialogHeight = media.size.height * 0.9;
         return Center(
@@ -122,32 +170,167 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
                             ),
                           ),
                           const SizedBox(height: 16),
-                          Text('Pixel Step (lower = more accurate, higher = faster): $tempPixelStep'),
-                          Slider(
-                            min: 1,
-                            max: 8,
-                            divisions: 7,
-                            value: tempPixelStep.toDouble(),
-                            label: tempPixelStep.toString(),
-                            onChanged: (v) {
-                              setStateDialog(() {
-                                tempPixelStep = v.round();
-                              });
-                            },
-                          ),
-                          Text('Min Blob Size (lower = detects smaller spots): $tempMinBlobSize'),
-                          Slider(
-                            min: 1,
-                            max: 20,
-                            divisions: 19,
-                            value: tempMinBlobSize.toDouble(),
-                            label: tempMinBlobSize.toString(),
-                            onChanged: (v) {
-                              setStateDialog(() {
-                                tempMinBlobSize = v.round();
-                              });
-                            },
-                          ),
+                          if (_detectionMode == DetectionMode.blob) ...[
+                            Text('Pixel Step (lower = more accurate, higher = faster): $tempPixelStep'),
+                            Slider(
+                              min: 1,
+                              max: 8,
+                              divisions: 7,
+                              value: tempPixelStep.toDouble(),
+                              label: tempPixelStep.toString(),
+                              onChanged: (v) {
+                                setStateDialog(() {
+                                  tempPixelStep = v.round();
+                                });
+                              },
+                            ),
+                            Text('Min Blob Size (lower = detects smaller spots): $tempMinBlobSize'),
+                            Slider(
+                              min: 1,
+                              max: 20,
+                              divisions: 19,
+                              value: tempMinBlobSize.toDouble(),
+                              label: tempMinBlobSize.toString(),
+                              onChanged: (v) {
+                                setStateDialog(() {
+                                  tempMinBlobSize = v.round();
+                                });
+                              },
+                            ),
+                          ] else ...[
+                            Text('Brightness Threshold: ${tempTinyConfig.brightnessThreshold}'),
+                            Slider(
+                              min: 100,
+                              max: 255,
+                              divisions: 31,
+                              value: tempTinyConfig.brightnessThreshold.toDouble(),
+                              label: tempTinyConfig.brightnessThreshold.toString(),
+                              onChanged: (v) {
+                                setStateDialog(() {
+                                  tempTinyConfig.brightnessThreshold = v.round();
+                                });
+                              },
+                            ),
+                            Text('Cluster Radius: ${tempTinyConfig.clusterRadius}'),
+                            Slider(
+                              min: 2,
+                              max: 10,
+                              divisions: 8,
+                              value: tempTinyConfig.clusterRadius.toDouble(),
+                              label: tempTinyConfig.clusterRadius.toString(),
+                              onChanged: (v) {
+                                setStateDialog(() {
+                                  tempTinyConfig.clusterRadius = v.round();
+                                });
+                              },
+                            ),
+                            Text('Min Cluster Pixels: ${tempTinyConfig.minClusterPixels}'),
+                            Slider(
+                              min: 1,
+                              max: 20,
+                              divisions: 19,
+                              value: tempTinyConfig.minClusterPixels.toDouble(),
+                              label: tempTinyConfig.minClusterPixels.toString(),
+                              onChanged: (v) {
+                                setStateDialog(() {
+                                  tempTinyConfig.minClusterPixels = v.round();
+                                });
+                              },
+                            ),
+                            Row(
+                              children: [
+                                const Text('Color Filter Enabled'),
+                                Switch(
+                                  value: tempTinyConfig.colorFilterEnabled,
+                                  onChanged: (v) {
+                                    setStateDialog(() {
+                                      tempTinyConfig.colorFilterEnabled = v;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            if (tempTinyConfig.colorFilterEnabled) ...[
+                              Text('HSV hMin: ${tempTinyConfig.hMin}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.hMin.toDouble(),
+                                label: tempTinyConfig.hMin.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.hMin = v.round();
+                                  });
+                                },
+                              ),
+                              Text('HSV hMax: ${tempTinyConfig.hMax}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.hMax.toDouble(),
+                                label: tempTinyConfig.hMax.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.hMax = v.round();
+                                  });
+                                },
+                              ),
+                              Text('HSV sMin: ${tempTinyConfig.sMin}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.sMin.toDouble(),
+                                label: tempTinyConfig.sMin.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.sMin = v.round();
+                                  });
+                                },
+                              ),
+                              Text('HSV sMax: ${tempTinyConfig.sMax}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.sMax.toDouble(),
+                                label: tempTinyConfig.sMax.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.sMax = v.round();
+                                  });
+                                },
+                              ),
+                              Text('HSV vMin: ${tempTinyConfig.vMin}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.vMin.toDouble(),
+                                label: tempTinyConfig.vMin.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.vMin = v.round();
+                                  });
+                                },
+                              ),
+                              Text('HSV vMax: ${tempTinyConfig.vMax}'),
+                              Slider(
+                                min: 0,
+                                max: 255,
+                                divisions: 255,
+                                value: tempTinyConfig.vMax.toDouble(),
+                                label: tempTinyConfig.vMax.toString(),
+                                onChanged: (v) {
+                                  setStateDialog(() {
+                                    tempTinyConfig.vMax = v.round();
+                                  });
+                                },
+                              ),
+                            ],
+                          ],
                         ],
                       ),
                     ),
@@ -160,9 +343,12 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
                   onPressed: () {
                     setState(() {
                       _selectedColor = tempColor;
-                      // Save the tuned values to be used in detection
-                      _pixelStep = tempPixelStep;
-                      _minBlobSize = tempMinBlobSize;
+                      if (_detectionMode == DetectionMode.blob) {
+                        _pixelStep = tempPixelStep;
+                        _minBlobSize = tempMinBlobSize;
+                      } else {
+                        _tinyPointDetector.config = tempTinyConfig;
+                      }
                     });
                     Navigator.of(context).pop();
                   },
@@ -179,6 +365,12 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
   void initState() {
     super.initState();
     _laserDetector = LaserDetector(_logNotifier);
+    _tinyPointDetector = TinyPointDetector(_logNotifier, TinyPointDetectorConfig());
+    _detectionManager = DetectionManager(
+      blobDetector: _laserDetector,
+      tinyPointDetector: _tinyPointDetector,
+      mode: _detectionMode,
+    );
     if (cameras.isNotEmpty) {
       _restartCamera(_selectedPreset);
     } else {
@@ -203,10 +395,16 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
 
   // Throttle frame processing to every 5th frame to prevent freezing at high resolutions
   void _processCameraImage(CameraImage image) {
+    if (_isProcessingFrame) return;
+    _isProcessingFrame = true;
     _frameCount++;
     const int throttle = 5; // Process every 5th frame
-    if (_frameCount % throttle != 0) return;
-    final blobCenters = _laserDetector.detectBlobsByColor(
+    if (_frameCount % throttle != 0) {
+      _isProcessingFrame = false;
+      return;
+    }
+    _detectionManager.mode = _detectionMode;
+    Offset? detected = _detectionManager.detect(
       image,
       _frameCount,
       _selectedColor,
@@ -214,12 +412,13 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
       minBlobSize: _minBlobSize,
     );
     setState(() {
-      _laserPositions = blobCenters;
+      _laserPositions = detected != null ? [detected] : [];
       _isBlocked = false;
     });
     if (_laserPositions.isNotEmpty) {
       _gameLogic.updateLaser(_laserPositions.first, _isBlocked);
     }
+    _isProcessingFrame = false;
   }
 
   @override
@@ -256,6 +455,29 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
                         _selectedPreset = preset;
                       });
                       _restartCamera(preset);
+                    }
+                  },
+                ),
+                const SizedBox(width: 24),
+                const Text('Detection Mode: ', style: TextStyle(fontSize: 16)),
+                DropdownButton<DetectionMode>(
+                  value: _detectionMode,
+                  items: [
+                    DropdownMenuItem(
+                      value: DetectionMode.blob,
+                      child: const Text('Blob'),
+                    ),
+                    DropdownMenuItem(
+                      value: DetectionMode.tinyPoint,
+                      child: const Text('Tiny Point'),
+                    ),
+                  ],
+                  onChanged: (mode) {
+                    if (mode != null) {
+                      // Only update state, do not trigger detection or heavy work here
+                      setState(() {
+                        _detectionMode = mode;
+                      });
                     }
                   },
                 ),
