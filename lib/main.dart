@@ -78,14 +78,17 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
   bool _isBlocked = false;
   int _frameCount = 0;
   final ValueNotifier<List<String>> _logNotifier = ValueNotifier([]);
+  int _pixelStep = 2;
+  int _minBlobSize = 5;
 
   void _showColorPicker() {
     showDialog(
       context: context,
       builder: (context) {
         Color tempColor = _selectedColor;
+        int tempPixelStep = 2;
+        int tempMinBlobSize = 5;
         final media = MediaQuery.of(context);
-        final double dialogWidth = media.size.width * 0.9;
         final double dialogHeight = media.size.height * 0.9;
         return Center(
           child: Container(
@@ -94,27 +97,62 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
               maxHeight: dialogHeight,
             ),
             child: AlertDialog(
-              title: const Text('Pick Laser Color'),
+              title: const Text('Pick Laser Color & Detection Tuning'),
               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
-              content: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: 800,
-                      minWidth: 400,
+              content: StatefulBuilder(
+                builder: (context, setStateDialog) {
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.vertical,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ConstrainedBox(
+                            constraints: BoxConstraints(maxWidth: 800, minWidth: 400),
+                            child: ColorPicker(
+                              pickerColor: tempColor,
+                              onColorChanged: (color) {
+                                setStateDialog(() {
+                                  tempColor = color;
+                                });
+                              },
+                              showLabel: true,
+                              pickerAreaHeightPercent: 0.8,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Text('Pixel Step (lower = more accurate, higher = faster): $tempPixelStep'),
+                          Slider(
+                            min: 1,
+                            max: 8,
+                            divisions: 7,
+                            value: tempPixelStep.toDouble(),
+                            label: tempPixelStep.toString(),
+                            onChanged: (v) {
+                              setStateDialog(() {
+                                tempPixelStep = v.round();
+                              });
+                            },
+                          ),
+                          Text('Min Blob Size (lower = detects smaller spots): $tempMinBlobSize'),
+                          Slider(
+                            min: 1,
+                            max: 20,
+                            divisions: 19,
+                            value: tempMinBlobSize.toDouble(),
+                            label: tempMinBlobSize.toString(),
+                            onChanged: (v) {
+                              setStateDialog(() {
+                                tempMinBlobSize = v.round();
+                              });
+                            },
+                          ),
+                        ],
+                      ),
                     ),
-                    child: ColorPicker(
-                      pickerColor: tempColor,
-                      onColorChanged: (color) {
-                        tempColor = color;
-                      },
-                      showLabel: true,
-                      pickerAreaHeightPercent: 0.8,
-                    ),
-                  ),
-                ),
+                  );
+                },
               ),
               actions: [
                 TextButton(
@@ -122,6 +160,9 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
                   onPressed: () {
                     setState(() {
                       _selectedColor = tempColor;
+                      // Save the tuned values to be used in detection
+                      _pixelStep = tempPixelStep;
+                      _minBlobSize = tempMinBlobSize;
                     });
                     Navigator.of(context).pop();
                   },
@@ -165,7 +206,13 @@ class _CameraGameScreenState extends State<CameraGameScreen> {
     _frameCount++;
     const int throttle = 5; // Process every 5th frame
     if (_frameCount % throttle != 0) return;
-    final blobCenters = _laserDetector.detectBlobsByColor(image, _frameCount, _selectedColor);
+    final blobCenters = _laserDetector.detectBlobsByColor(
+      image,
+      _frameCount,
+      _selectedColor,
+      pixelStep: _pixelStep,
+      minBlobSize: _minBlobSize,
+    );
     setState(() {
       _laserPositions = blobCenters;
       _isBlocked = false;

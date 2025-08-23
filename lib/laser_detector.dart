@@ -16,7 +16,7 @@ class LaserDetector {
   LaserDetector(this.logNotifier);
 
   /// Returns a list of detected red blob centers (Offset), or empty if none found.
-  List<Offset> detectBlobsByColor(CameraImage image, int frameNumber, Color color) {
+  List<Offset> detectBlobsByColor(CameraImage image, int frameNumber, Color color, {int pixelStep = 2, int minBlobSize = 5}) {
     // Convert color to RGB
     int targetR = color.red, targetG = color.green, targetB = color.blue;
     if (image.format.group != ImageFormatGroup.yuv420 && image.format.group != ImageFormatGroup.bgra8888) {
@@ -27,8 +27,8 @@ class LaserDetector {
     final height = image.height;
     // Step 1: Collect all candidate red pixels
     List<Offset> candidates = [];
-    for (int y = 0; y < height; y += 2) {
-      for (int x = 0; x < width; x += 2) {
+    for (int y = 0; y < height; y += pixelStep) {
+      for (int x = 0; x < width; x += pixelStep) {
         int r = 0, g = 0, b = 0;
         if (image.format.group == ImageFormatGroup.bgra8888) {
           final i = (y * width + x) * 4;
@@ -75,7 +75,7 @@ class LaserDetector {
     // Step 3: Calculate centroid for each blob
     List<Offset> centers = [];
     for (final blob in blobs) {
-      if (blob.length < 5) continue; // ignore tiny blobs
+      if (blob.length < minBlobSize) continue; // ignore tiny blobs
       double sumX = 0, sumY = 0;
       for (final pt in blob) {
         sumX += pt.dx;
@@ -83,7 +83,7 @@ class LaserDetector {
       }
       centers.add(Offset(sumX / blob.length, sumY / blob.length));
     }
-    _log('Frame $frameNumber | Blobs found: ${centers.length}');
+  _log('Frame $frameNumber | Blobs found: ${centers.length} | pixelStep: $pixelStep | minBlobSize: $minBlobSize');
     _trimLogs();
     return centers;
   }
